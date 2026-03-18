@@ -2,13 +2,15 @@
 
 namespace Marmanik\AzureTableCache;
 
+use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\Store;
 use Marmanik\AzureTableCache\Contracts\AzureTableClient;
 use Marmanik\AzureTableCache\Data\CacheEntry;
 use Marmanik\AzureTableCache\Exceptions\AzureTableException;
 use Marmanik\AzureTableCache\Exceptions\InvalidCacheKeyException;
 
-class AzureTableCacheStore implements Store
+class AzureTableCacheStore implements Store, LockProvider
 {
     public function __construct(
         protected readonly AzureTableClient $client,
@@ -188,6 +190,23 @@ class AzureTableCacheStore implements Store
         }
 
         return $count;
+    }
+
+    public function lock($name, $seconds = 0, $owner = null): Lock
+    {
+        return new AzureTableCacheLock(
+            client: $this->client,
+            table: $this->table,
+            partitionKey: $this->partitionKey,
+            name: $name,
+            seconds: $seconds,
+            owner: $owner,
+        );
+    }
+
+    public function restoreLock($name, $owner): Lock
+    {
+        return $this->lock($name, 0, $owner);
     }
 
     public function getPrefix(): string

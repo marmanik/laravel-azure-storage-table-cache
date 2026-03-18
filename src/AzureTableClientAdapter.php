@@ -53,6 +53,21 @@ class AzureTableClientAdapter implements AzureTableClient
         }
     }
 
+    public function insertEntity(string $table, CacheEntry $entry): void
+    {
+        try {
+            $entity = new Entity();
+            $entity->setPartitionKey($entry->partitionKey);
+            $entity->setRowKey($entry->rowKey);
+            $entity->addProperty('CacheValue', EdmType::STRING, $entry->encodedValue);
+            $entity->addProperty('ExpiresAt', EdmType::STRING, (string) $entry->expiresAt);
+
+            $this->proxy->insertEntity($table, $entity);
+        } catch (ServiceException $e) {
+            throw new AzureTableException($e->getMessage(), $e->getCode(), $e);
+        }
+    }
+
     public function deleteEntity(string $table, string $partitionKey, string $rowKey): void
     {
         try {

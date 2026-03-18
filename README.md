@@ -177,6 +177,34 @@ $users = Cache::many(['user:1', 'user:2']);
 
 ---
 
+## Atomic locks
+
+The driver implements Laravel's `LockProvider` contract, so `Cache::lock()` works out of the box.
+
+Lock acquisition uses `insertEntity` under the hood — Azure Table Storage guarantees that only one concurrent caller succeeds; all others receive a 409 Conflict. If an existing lock has expired it is automatically overwritten.
+
+```php
+// Acquire a lock for 10 seconds
+$lock = Cache::lock('invoice:42', 10);
+
+if ($lock->get()) {
+    // Only one process reaches here at a time
+    processInvoice(42);
+    $lock->release();
+}
+
+// Block until the lock is available (with optional timeout)
+Cache::lock('invoice:42', 10)->block(5, function () {
+    processInvoice(42);
+});
+```
+
+Lock keys follow the same rules as cache keys — forbidden characters (`/ \ # ?` and control characters) will throw an `InvalidCacheKeyException`.
+
+Lock entries are stored in the same table as cache entries using a `lock:` prefix on the row key to avoid collisions.
+
+---
+
 ## Artisan commands
 
 ### Create the storage table
