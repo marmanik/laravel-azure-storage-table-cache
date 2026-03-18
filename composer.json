@@ -9,13 +9,13 @@
         "azure-storage",
         "table-storage"
     ],
-    "version": "1.0.0",
+    "version": "1.0.1",
     "homepage": "https://github.com/marmanik/laravel-azure-table-cache",
     "license": "MIT",
     "authors": [
         {
             "name": "marmanik",
-            "email": "marmanik@example.com",
+            "email": "marmaridisn@gmail.com",
             "role": "Developer"
         }
     ],
