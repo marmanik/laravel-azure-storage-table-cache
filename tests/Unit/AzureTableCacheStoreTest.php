@@ -4,6 +4,7 @@ use Marmanik\AzureTableCache\AzureTableCacheStore;
 use Marmanik\AzureTableCache\Contracts\AzureTableClient;
 use Marmanik\AzureTableCache\Data\CacheEntry;
 use Marmanik\AzureTableCache\Exceptions\AzureTableException;
+use Marmanik\AzureTableCache\Exceptions\InvalidCacheKeyException;
 
 function makeEntry(mixed $value, int $expiresAt = 0): CacheEntry
 {
@@ -120,17 +121,36 @@ it('returns true when forgetting a key that does not exist', function () {
     expect(makeStore($client)->forget('missing'))->toBeTrue();
 });
 
-it('encodes keys using url-safe base64', function () {
-    $store = makeStore(Mockery::mock(AzureTableClient::class));
-    $reflection = new ReflectionMethod($store, 'encodeKey');
+it('accepts a valid cache key', function () {
+    $client = Mockery::mock(AzureTableClient::class);
+    $client->shouldReceive('getEntity')->once()->andThrow(AzureTableException::notFound());
 
-    $encoded = $reflection->invoke($store, 'some/key?with#special\\chars');
-
-    expect($encoded)
-        ->not->toContain('+')
-        ->not->toContain('/')
-        ->not->toContain('=');
+    expect(makeStore($client)->get('valid-key:user.42'))->toBeNull();
 });
+
+it('throws on a key containing a forward slash', function () {
+    makeStore(Mockery::mock(AzureTableClient::class))->get('user/42');
+})->throws(InvalidCacheKeyException::class);
+
+it('throws on a key containing a backslash', function () {
+    makeStore(Mockery::mock(AzureTableClient::class))->get('user\\42');
+})->throws(InvalidCacheKeyException::class);
+
+it('throws on a key containing a hash', function () {
+    makeStore(Mockery::mock(AzureTableClient::class))->get('tags#featured');
+})->throws(InvalidCacheKeyException::class);
+
+it('throws on a key containing a question mark', function () {
+    makeStore(Mockery::mock(AzureTableClient::class))->get('filter?page=1');
+})->throws(InvalidCacheKeyException::class);
+
+it('throws on a key containing a control character', function () {
+    makeStore(Mockery::mock(AzureTableClient::class))->get("bad\x01key");
+})->throws(InvalidCacheKeyException::class);
+
+it('throws on a key exceeding 1024 bytes', function () {
+    makeStore(Mockery::mock(AzureTableClient::class))->get(str_repeat('a', 1025));
+})->throws(InvalidCacheKeyException::class);
 
 it('round-trips an array of objects', function () {
     $objects = array_map(

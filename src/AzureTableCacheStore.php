@@ -6,6 +6,7 @@ use Illuminate\Contracts\Cache\Store;
 use Marmanik\AzureTableCache\Contracts\AzureTableClient;
 use Marmanik\AzureTableCache\Data\CacheEntry;
 use Marmanik\AzureTableCache\Exceptions\AzureTableException;
+use Marmanik\AzureTableCache\Exceptions\InvalidCacheKeyException;
 
 class AzureTableCacheStore implements Store
 {
@@ -42,7 +43,7 @@ class AzureTableCacheStore implements Store
     {
         $entry = new CacheEntry(
             partitionKey: $this->partitionKey,
-            rowKey: $this->encodeKey($key),
+            rowKey: $this->rowKey($key),
             encodedValue: base64_encode(gzcompress(serialize($value))),
             expiresAt: $seconds > 0 ? time() + (int) $seconds : 0,
         );
@@ -112,7 +113,7 @@ class AzureTableCacheStore implements Store
     public function forget($key): bool
     {
         try {
-            $this->client->deleteEntity($this->table, $this->partitionKey, $this->encodeKey($key));
+            $this->client->deleteEntity($this->table, $this->partitionKey, $this->rowKey($key));
 
             return true;
         } catch (AzureTableException $e) {
@@ -197,7 +198,7 @@ class AzureTableCacheStore implements Store
     protected function fetchEntry(string $key): ?CacheEntry
     {
         try {
-            return $this->client->getEntity($this->table, $this->partitionKey, $this->encodeKey($key));
+            return $this->client->getEntity($this->table, $this->partitionKey, $this->rowKey($key));
         } catch (AzureTableException $e) {
             if ($e->getCode() === 404) {
                 return null;
@@ -213,13 +214,25 @@ class AzureTableCacheStore implements Store
     }
 
     /**
-     * Encode a cache key to a valid Azure Table RowKey.
+     * Validate and return the Azure Table RowKey for the given cache key.
      *
-     * Azure RowKeys cannot contain: / \ # ? and control characters.
-     * We use URL-safe base64 (no padding) to guarantee a clean string.
+     * Azure RowKeys cannot contain: / \ # ? and control characters (0x00–0x1F, 0x7F).
+     * Maximum length is 1024 bytes.
+     *
+     * @throws InvalidCacheKeyException
      */
-    protected function encodeKey(string $key): string
+    protected function rowKey(string $key): string
     {
-        return rtrim(strtr(base64_encode($this->prefix . $key), '+/', '-_'), '=');
+        $rowKey = $this->prefix . $key;
+
+        if (strlen($rowKey) > 1024) {
+            throw InvalidCacheKeyException::tooLong($key);
+        }
+
+        if (preg_match('/[\/\\\\#?\x00-\x1F\x7F]/', $rowKey)) {
+            throw InvalidCacheKeyException::forbiddenCharacters($key);
+        }
+
+        return $rowKey;
     }
 }
