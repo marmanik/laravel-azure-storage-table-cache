@@ -1,0 +1,13 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+    - vendor/phpstan/phpstan-deprecation-rules/extension.neon
+
+parameters:
+    paths:
+        - src
+
+    level: 5
+
+    ignoreErrors:
+
+    excludePaths:
