@@ -73,6 +73,32 @@ it('increments a numeric value', function () {
     expect(makeStore($client)->increment('counter', 5))->toBe(15);
 });
 
+it('preserves the original TTL after increment', function () {
+    $expiresAt = time() + 86400; // 1 day from now
+    $entry = makeEntry(0, $expiresAt);
+
+    $client = Mockery::mock(AzureTableClient::class);
+    $client->shouldReceive('getEntity')->once()->andReturn($entry);
+    $client->shouldReceive('upsertEntity')
+        ->once()
+        ->withArgs(fn (string $table, CacheEntry $updated) => $updated->expiresAt === $expiresAt);
+
+    expect(makeStore($client)->increment('visits'))->toBe(1);
+});
+
+it('preserves the original TTL after decrement', function () {
+    $expiresAt = time() + 86400;
+    $entry = makeEntry(10, $expiresAt);
+
+    $client = Mockery::mock(AzureTableClient::class);
+    $client->shouldReceive('getEntity')->once()->andReturn($entry);
+    $client->shouldReceive('upsertEntity')
+        ->once()
+        ->withArgs(fn (string $table, CacheEntry $updated) => $updated->expiresAt === $expiresAt);
+
+    expect(makeStore($client)->decrement('visits', 3))->toBe(7);
+});
+
 it('returns false when incrementing a non-numeric value', function () {
     $client = Mockery::mock(AzureTableClient::class);
     $client->shouldReceive('getEntity')->once()->andReturn(makeEntry('not-a-number'));

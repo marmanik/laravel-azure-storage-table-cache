@@ -69,14 +69,32 @@ class AzureTableCacheStore implements Store
 
     public function increment($key, $value = 1): int|bool
     {
-        $current = $this->get($key);
+        $entry = $this->fetchEntry($key);
+
+        if ($entry === null) {
+            return false;
+        }
+
+        $current = unserialize(gzuncompress(base64_decode($entry->encodedValue)));
 
         if (! is_numeric($current)) {
             return false;
         }
 
         $new = $current + $value;
-        $this->forever($key, $new);
+
+        $updated = new CacheEntry(
+            partitionKey: $entry->partitionKey,
+            rowKey: $entry->rowKey,
+            encodedValue: base64_encode(gzcompress(serialize($new))),
+            expiresAt: $entry->expiresAt, // preserve the original TTL
+        );
+
+        try {
+            $this->client->upsertEntity($this->table, $updated);
+        } catch (AzureTableException) {
+            return false;
+        }
 
         return $new;
     }
