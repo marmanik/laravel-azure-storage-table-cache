@@ -8,16 +8,18 @@ use Marmanik\AzureTableCache\AzureTableCacheStore;
 
 class PurgeExpiredCacheCommand extends Command
 {
-    public $signature = 'azure-table-cache:purge-expired';
+    public $signature = 'azure-table-cache:purge-expired
+                         {--store=azure-table : The cache store name as defined in config/cache.php}';
 
     public $description = 'Delete expired entries from the Azure Storage Table cache';
 
     public function handle(): int
     {
-        $store = Cache::driver('azure-table')->getStore();
+        $storeName = $this->option('store');
+        $store = Cache::driver($storeName)->getStore();
 
         if (! $store instanceof AzureTableCacheStore) {
-            $this->error('The configured cache driver is not AzureTableCacheStore.');
+            $this->error("The \"{$storeName}\" cache store is not an AzureTableCacheStore.");
 
             return self::FAILURE;
         }

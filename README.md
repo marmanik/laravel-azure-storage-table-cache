@@ -11,8 +11,8 @@ Each cache entry is stored as a row in an Azure Storage Table with three columns
 | Column | Type | Description |
 |---|---|---|
 | `PartitionKey` | string | Configurable (default: `cache`) |
-| `RowKey` | string | URL-safe base64 of the cache key |
-| `CacheValue` | string | `base64(serialize($value))` |
+| `RowKey` | string | The cache key as-is (validated, not encoded) |
+| `CacheValue` | string | `base64(gzcompress(serialize($value)))` |
 | `ExpiresAt` | string | Unix timestamp; `0` = never expires |
 
 > Azure Storage Tables has no native TTL. Expiry is enforced on read, and a provided Artisan command cleans up stale entries on a schedule.
@@ -39,26 +39,25 @@ The service provider is auto-discovered — no manual registration needed.
 
 ## Configuration
 
-Publish the config file:
-
-```bash
-php artisan vendor:publish --tag="azure-table-cache-config"
-```
-
-This creates `config/azure-table-cache.php`:
+No separate config file needed. Add the store directly to `config/cache.php`, the same way as the built-in DynamoDB driver:
 
 ```php
-return [
-    'account_name'  => env('AZURE_STORAGE_ACCOUNT_NAME'),
-    'account_key'   => env('AZURE_STORAGE_ACCOUNT_KEY'),
-    'endpoint'      => env('AZURE_STORAGE_TABLE_ENDPOINT'), // optional — for Azurite
-    'table'         => env('AZURE_CACHE_TABLE', 'cache'),
-    'partition_key' => env('AZURE_CACHE_PARTITION_KEY', 'cache'),
-    'prefix'        => env('AZURE_CACHE_PREFIX', ''),
-];
+'stores' => [
+
+    'azure-table' => [
+        'driver'        => 'azure-table',
+        'account_name'  => env('AZURE_STORAGE_ACCOUNT_NAME'),
+        'account_key'   => env('AZURE_STORAGE_ACCOUNT_KEY'),
+        'endpoint'      => env('AZURE_STORAGE_TABLE_ENDPOINT'), // optional — for Azurite
+        'table'         => env('AZURE_CACHE_TABLE', 'cache'),
+        'partition_key' => env('AZURE_CACHE_PARTITION_KEY', 'cache'),
+        'prefix'        => env('AZURE_CACHE_PREFIX', ''),
+    ],
+
+],
 ```
 
-Add these variables to your `.env`:
+Add the corresponding variables to your `.env`:
 
 ```env
 AZURE_STORAGE_ACCOUNT_NAME=your_account_name
@@ -66,34 +65,10 @@ AZURE_STORAGE_ACCOUNT_KEY=your_base64_account_key
 AZURE_CACHE_TABLE=cache
 ```
 
----
-
-## Register the driver
-
-Open `config/cache.php` and add the store:
-
-```php
-'stores' => [
-
-    // ... other stores
-
-    'azure-table' => [
-        'driver' => 'azure-table',
-    ],
-
-],
-```
-
-To use it as the **default** cache driver, update your `.env`:
+To use it as the **default** cache driver:
 
 ```env
 CACHE_STORE=azure-table
-```
-
-Or set it as default in `config/cache.php`:
-
-```php
-'default' => env('CACHE_STORE', 'azure-table'),
 ```
 
 ---
@@ -169,6 +144,26 @@ if (Cache::has('feature:dark-mode')) {
 }
 ```
 
+### Cache key rules
+
+Cache keys are stored directly as the Azure Table `RowKey` without any encoding. Azure enforces the following restrictions — the driver will throw an `InvalidCacheKeyException` if a key violates them:
+
+| Rule | Detail |
+|---|---|
+| Forbidden characters | `/` `\` `#` `?` and control characters (`0x00–0x1F`, `0x7F`) |
+| Maximum length | 1024 bytes |
+
+```php
+Cache::put('user:42:profile', $value, 3600);   // ✓ colon is fine
+Cache::put('featured.posts', $value, 3600);    // ✓ dot is fine
+Cache::put('page_1_results', $value, 3600);    // ✓ underscore is fine
+
+Cache::put('user/42', $value, 3600);           // ✗ InvalidCacheKeyException — slash
+Cache::put('search?q=hello', $value, 3600);    // ✗ InvalidCacheKeyException — question mark
+```
+
+---
+
 ### Storing multiple values at once
 
 ```php
@@ -190,7 +185,21 @@ $users = Cache::many(['user:1', 'user:2']);
 php artisan azure-table-cache:create-table
 ```
 
-Creates the Azure Storage Table configured in `AZURE_CACHE_TABLE`. Safe to run multiple times.
+Creates the Azure Storage Table configured in the cache store. Safe to run multiple times — if the table already exists the command exits cleanly.
+
+**Options:**
+
+| Option | Default | Description |
+|---|---|---|
+| `--store` | `azure-table` | The cache store name as defined in `config/cache.php` |
+
+```bash
+# Default store name
+php artisan azure-table-cache:create-table
+
+# Custom store name
+php artisan azure-table-cache:create-table --store=my-azure-store
+```
 
 ### Purge expired entries
 
@@ -200,12 +209,29 @@ Azure Tables has no automatic expiry. Entries are ignored on read once expired, 
 php artisan azure-table-cache:purge-expired
 ```
 
+**Options:**
+
+| Option | Default | Description |
+|---|---|---|
+| `--store` | `azure-table` | The cache store name as defined in `config/cache.php` |
+
+```bash
+# Default store name
+php artisan azure-table-cache:purge-expired
+
+# Custom store name
+php artisan azure-table-cache:purge-expired --store=my-azure-store
+```
+
 Schedule it in `routes/console.php` (Laravel 11+):
 
 ```php
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('azure-table-cache:purge-expired')->daily();
+
+// With a custom store name
+Schedule::command('azure-table-cache:purge-expired --store=my-azure-store')->daily();
 ```
 
 Or in `app/Console/Kernel.php` (Laravel 10):
@@ -227,12 +253,18 @@ protected function schedule(Schedule $schedule): void
 docker run -p 10002:10002 mcr.microsoft.com/azure-storage/azurite azurite-table
 ```
 
-Then set in your `.env`:
+Then configure your store in `config/cache.php`:
 
-```env
-AZURE_STORAGE_ACCOUNT_NAME=devstoreaccount1
-AZURE_STORAGE_ACCOUNT_KEY=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
-AZURE_STORAGE_TABLE_ENDPOINT=http://127.0.0.1:10002/devstoreaccount1
+```php
+'azure-table' => [
+    'driver'        => 'azure-table',
+    'account_name'  => env('AZURE_STORAGE_ACCOUNT_NAME', 'devstoreaccount1'),
+    'account_key'   => env('AZURE_STORAGE_ACCOUNT_KEY', 'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=='),
+    'endpoint'      => env('AZURE_STORAGE_TABLE_ENDPOINT', 'http://127.0.0.1:10002/devstoreaccount1'),
+    'table'         => env('AZURE_CACHE_TABLE', 'cache'),
+    'partition_key' => env('AZURE_CACHE_PARTITION_KEY', 'cache'),
+    'prefix'        => env('AZURE_CACHE_PREFIX', ''),
+],
 ```
 
 > The account name and key above are the well-known Azurite defaults — they are not real credentials.

@@ -15,7 +15,6 @@ class AzureTableCacheServiceProvider extends PackageServiceProvider
     {
         $package
             ->name('azure-table-cache')
-            ->hasConfigFile()
             ->hasCommands([
                 CreateCacheTableCommand::class,
                 PurgeExpiredCacheCommand::class,
@@ -24,8 +23,8 @@ class AzureTableCacheServiceProvider extends PackageServiceProvider
 
     public function packageBooted(): void
     {
-        // Build the connection string outside the closure — Cache::extend() rebinds
-        // the closure to CacheManager, so $this would no longer refer to this provider.
+        // Laravel passes the store's config array from cache.php as the second argument,
+        // matching the same pattern used by the built-in DynamoDB driver.
         $buildConnectionString = static function (array $config): string {
             if (! empty($config['endpoint'])) {
                 return sprintf(
@@ -43,17 +42,15 @@ class AzureTableCacheServiceProvider extends PackageServiceProvider
             );
         };
 
-        Cache::extend('azure-table', function ($app) use ($buildConnectionString) {
-            $config = $app['config']['azure-table-cache'];
-
+        Cache::extend('azure-table', function ($app, $config) use ($buildConnectionString) {
             $client = new AzureTableClientAdapter(
                 TableRestProxy::createTableService($buildConnectionString($config)),
             );
 
             $store = new AzureTableCacheStore(
                 client: $client,
-                table: $config['table'],
-                partitionKey: $config['partition_key'],
+                table: $config['table'] ?? 'cache',
+                partitionKey: $config['partition_key'] ?? 'cache',
                 prefix: $config['prefix'] ?? '',
             );
 

@@ -8,25 +8,32 @@ use MicrosoftAzure\Storage\Table\TableRestProxy;
 
 class CreateCacheTableCommand extends Command
 {
-    public $signature = 'azure-table-cache:create-table';
+    public $signature = 'azure-table-cache:create-table
+                         {--store=azure-table : The cache store name as defined in config/cache.php}';
 
     public $description = 'Create the Azure Storage Table used for caching';
 
     public function handle(): int
     {
-        $config = config('azure-table-cache');
-        $table = $config['table'];
+        $storeName = $this->option('store');
+        $config = config("cache.stores.{$storeName}");
+
+        if (empty($config) || ($config['driver'] ?? '') !== 'azure-table') {
+            $this->error("No azure-table store found under cache.stores.{$storeName} in config/cache.php.");
+
+            return self::FAILURE;
+        }
+
+        $table = $config['table'] ?? 'cache';
 
         $this->info("Creating Azure Storage Table: {$table}");
 
-        $connectionString = $this->buildConnectionString($config);
-        $client = TableRestProxy::createTableService($connectionString);
+        $client = TableRestProxy::createTableService($this->buildConnectionString($config));
 
         try {
             $client->createTable($table);
             $this->info("Table '{$table}' created successfully.");
         } catch (ServiceException $e) {
-            // 409 Conflict means the table already exists
             if ($e->getCode() === 409) {
                 $this->warn("Table '{$table}' already exists — nothing to do.");
 
